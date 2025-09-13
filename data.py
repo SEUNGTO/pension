@@ -1,9 +1,8 @@
-import pdb
 import os
 import re
+import pdb
 import requests
 import pandas as pd
-from bs4 import BeautifulSoup
 
 def fetch_financial_report(corp_code, bsns_year, reprt_code) :
 
@@ -82,23 +81,44 @@ def make_clean_data(item) :
 
 if __name__ == '__main__' : 
 
-    CORP_CODE_LIST = ['00126380', '00000000']
-    YEAR_LIST = range(2015, 2025)
+    CORPS = pd.read_csv('corp_code.csv', dtype = str, sep = "\t")
+    CORPS = CORPS.drop('Unnamed: 0', axis = 1).dropna().reset_index(drop = True)
+    CORP_CODE_LIST = CORPS['corp_code']
 
+    YEAR_LIST = range(2015, 2025)
+    REPRT_LIST = ['11013', '11012', '11014', '11011']
+    
     result = pd.DataFrame()
+    
+    iter = 0
+    total_iter = len(CORP_CODE_LIST) * len(YEAR_LIST)
+    batch_size = 20
+    
 
     for YEAR in YEAR_LIST :
         
-        for CORP_CODE in CORP_CODE_LIST :
+        for REPRT in REPRT_LIST : 
+        
+            for s in range(int(len(CORP_CODE_LIST)/batch_size)) :
 
-            item = fetch_financial_report(CORP_CODE, YEAR, '11011')
-            item = make_clean_data(item)
+                try : 
+                    corp = CORP_CODE_LIST[s * batch_size : (s+1) * batch_size]
+                    CORP_CODE = ",".join(corp)
+                    item = fetch_financial_report(CORP_CODE, YEAR, REPRT)
+                    item = make_clean_data(item)
+                    item['보고서코드'] = REPRT
 
-            result = pd.concat([result, item])
+                    result = pd.concat([result, item])
 
-
-    pdb.set_trace()
-
-    final = result.pivot(index=['종목코드', '날짜'], columns='계정명', values='금액')
-
+                except : 
+                    continue
+                
+                finally :
+                    iter += 1
+                    print(f"{iter}번째 완료 | 진행률 : {iter/total_iter:8.2f}%", end = "\r")
+            
+    result.to_csv('data/result.csv', sep = "\t")
+    pivot_data = result.pivot(index=['종목코드', '날짜'], columns='계정명', values='금액')
+    pivot_data.to_csv('data/pivot_data.csv', sep = "\t")
+    
     pdb.set_trace()
