@@ -23,6 +23,4 @@ xml = zfile.read("CORPCODE.xml").decode("utf-8")
 dict_data = xmltodict.parse(xml)
 data = dict_data['result']['list']
 df = pd.DataFrame(data)
-
-import pdb; pdb.set_trace()
-
+df.to_csv('corp_code.csv')

@@ -59,9 +59,9 @@ def make_clean_data(item) :
         fs_div = 'OFS'
     con1 = data['fs_div'] == fs_div
     data = data[con1]
-
+    
     # 3) 수익성 지표에 해당하는 계정 선택
-    acnt_list = ['매출액', '영업이익', '법인세차감전 순이익', '당기순이익']
+    acnt_list = ['매출액', '영업이익', '법인세차감전 순이익', '당기순이익', '자산총계', '자본총계']
     con2 = data['account_nm'].isin(acnt_list)
     data = data[con2]
 
@@ -85,7 +85,6 @@ def make_clean_data(item) :
     return data
 
 
-
 if __name__ == '__main__' : 
 
     CORPS = pd.read_csv('corp_code.csv', dtype = str, sep = "\t")
@@ -97,17 +96,17 @@ if __name__ == '__main__' :
     
     result = pd.DataFrame()
     
-    iter = 0
-    total_iter = len(CORP_CODE_LIST) * len(YEAR_LIST) * len(REPRT_LIST)
-    print("total_iter", total_iter)
-    batch_size = 30
-    
+    i = 0
+    batch_size = 20
+    corp_iter = int(len(CORP_CODE_LIST)/batch_size)
+    total_iter = corp_iter * len(YEAR_LIST) * len(REPRT_LIST)
+    print("total_iter :", total_iter)
 
     for YEAR in YEAR_LIST :
         
         for REPRT in REPRT_LIST : 
         
-            for s in range(int(len(CORP_CODE_LIST)/batch_size)) :
+            for s in range(corp_iter) :
 
                 try : 
                     corp = CORP_CODE_LIST[s * batch_size : (s+1) * batch_size]
@@ -120,15 +119,17 @@ if __name__ == '__main__' :
 
                 except : 
                     msg = f"ERROR : {YEAR} | {REPRT} | {CORP_CODE}"
-                    logging.error(msg, exc_info=True)
+                    logging.error(msg)
                     continue
                 
                 finally :
-                    iter += 1
-                    progress = (iter/total_iter) * 100
-                    print(f"{iter}번째 완료 | 진행률 : {progress:5.2f}% | 현재 데이터 : {len(result)}" , end = "\r")
-            
+                    i += 1
+                    progress = (i/total_iter) * 100
+                    print(f"{i}번째 완료 | 진행률 : {progress:5.2f}% | 현재 데이터 : {len(result)}" , end = "\r")
+
+    # 데이터 저장    
+    os.makedirs("data", exist_ok=True)
     result.to_csv('data/result.csv', sep = "\t", index = False)
-    pivot_data = result.pivot_table(index=['종목코드', '날짜'], columns='계정명', values='금액')
-    pivot_data.to_csv('data/pivot_data.csv', sep = "\t", index = False)
+    pivot_data = result.pivot_table(index=['종목코드', '날짜', '보고서코드'], columns='계정명', values='금액')
+    pivot_data.to_csv('data/pivot_data.csv', sep = "\t")
     
