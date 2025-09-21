@@ -1,5 +1,5 @@
 import os
-import pdb
+from tqdm import tqdm
 import pandas as pd
 import FinanceDataReader as fdr
 from pandas.tseries.offsets import MonthBegin, MonthEnd
@@ -57,12 +57,10 @@ fs.loc[:, 'Y7'] = fs['법인세차감전 순이익'] / fs['자산총계']
 # +-----------------------+
 """
     [ 백테스트 방법 ]
-(1) 리밸런싱 주기 : 분기 1회
+(1) 리밸런싱 주기 : 분기 1회 / 반기 1회 / 연 1회
 (2) 매수/매도 : 다음 분기 초에 매수 > 분기 말에 매도
  e.g. 3월 31일 보고서 기준인 경우 : 4월 1일 종가에 매수, 6월 30일 종가에 매도
-(3) 기타 : 발표 시점은 고려하지 않음
- - 현실적으로는 기준일로부터 1달 정도 buffer를 두어야 함
- - 지금은 감안하지 않고 추후에 보완
+(3) 기타 : 발표 시점을 고려하지 않은 경우(buffer = 0)와 고려한 경우(buffer = 1) 모두 테스트
 """
 
 # 성과를 살펴볼 5개 그룹(G5가 가장 좋음)
@@ -72,60 +70,101 @@ group = ['G1', 'G2', 'G3', 'G4', 'G5']
 y_list = ['Y1', 'Y2', 'Y3', 'Y4', 'Y5', 'Y6', 'Y7']
 date_list = fs['날짜'].sort_values().unique()  # 리밸런싱 주기를 늘리려면 사용할 date 빈도를 수정
 
-# 백테스팅 구간
-for date in date_list :
 
-    for y in y_list :
+# +-----------------------+
+# | 3. 백테스트 시작        |
+# +-----------------------+
+
+# 백테스팅 설정
+test_setting = {
+    'quarterly' : {
+        'holding_period' : 3,
+        'rebalance_month' : [3, 6, 9, 12]
+    },
+    'semiannually' : {
+        'holding_period' : 6,
+        'rebalance_month' : [6, 12]
+    },
+    'annually' : {
+        'holding_period' : 12,
+        'rebalance_month' : [12]
+    },
+}
+
+for test_period, setting in test_setting.items() :
+
+    holding_period = setting['holding_period']
+    rebalance_month = setting['rebalance_month']
+    date_list = [d for d in date_list if d.month in rebalance_month]
+
+
+    for buffer in [0, 1] : 
+
+        for date in date_list :
+
+            for y in y_list :
+                
+                print(f"BUFFER : {buffer} | {test_period} |{date.strftime('%Y-%m-%d')} | {y}               ")
+
+                tmp = fs.loc[fs['날짜'] == date, ['종목코드', '날짜', y]].copy()
+                tmp['그룹'] = pd.qcut(tmp[y], len(group), labels=group)
+                tmp['기간수익률'] = None
+                tmp['표준편차'] = None
+
+                
+                buy_date = date + MonthBegin(buffer + 0)
+                sell_date = date + MonthEnd(buffer + holding_period)
+
+                i = 0
+                for code in tmp['종목코드'] :
+                    
+                    i += 1
+                    # 가격 정보가 없는 경우 다음으로 
+                    nm = f'price/{code}.csv'
+                    if not os.path.exists(nm) :
+                        continue
+
+                    p = pd.read_csv(nm)
+                    p['Date'] = pd.to_datetime(p['Date'])
+                    p = p.set_index('Date').loc[buy_date:sell_date]['Change']
+                    
+                    
+                    if p.std() > 0.0 :
+                        # 가격은 있으나, 거래정지 등의 사유로 표준편차가 0인 경우는 제외
+                        tmp.loc[tmp['종목코드'] == code, '기간수익률'] = p.sum()   # 전일 대비 등락률의 합 = 기간수익률
+                        tmp.loc[tmp['종목코드'] == code, '표준편차'] = p.std()     # 전일 대비 등락률의 표준편차
+                    
+                    
+                    print(f" - {i}번째 작업 중 | 진행률 : {(i / len(tmp['종목코드'])) * 100:5.2f}%", end = "\r")
+
+                # 성과 데이터 생성
+                rf = riskfree.loc[buy_date:sell_date].mean().values[0]
+                tmp['성과'] = (tmp['기간수익률'] - rf) / tmp['표준편차']
+                
+                os.makedirs(f'{test_period}_summary', exist_ok=True)
+                summary = tmp.dropna().groupby('그룹', observed=False)[['성과']].mean()
+                summary.to_csv(f"{test_period}_summary/{date.strftime('%Y-%m-%d')}_{y}_buffer{buffer}M.csv")
+
+                # 분석용 데이터 저장
+                os.makedirs(f'{test_period}_result', exist_ok=True)
+                tmp.to_csv(f"{test_period}_result/{date.strftime('%Y-%m-%d')}_{y}_buffer{buffer}M.csv", index = False)
         
-        print(f"{date.strftime('%Y-%m-%d')} | {y} 백테스팅...")
 
-        tmp = fs.loc[fs['날짜'] == date, ['종목코드', '날짜', y]].copy()
-        tmp['그룹'] = pd.qcut(tmp[y], len(group), labels=group)
-        tmp['기간수익률'] = None
-        tmp['표준편차'] = None
+        # +-----------------------+
+        # | 4. 결과 요약           |
+        # +-----------------------+
+        file_list = os.listdir(f'{test_period}_summary')
+        file_list = [f for f in file_list if f"buffer{buffer}M" in f]
+        summary = pd.DataFrame()
+        for file in tqdm(file_list) :
 
-        # 기준일자에 바로 실적을 알 수 있다고 가정
-        # 현실성있게 하려면 1달 정도 buffer 필요
-        buffer = 1
-        buy_date = date + MonthBegin(buffer + 0)
-        sell_date = date + MonthEnd(buffer + 3)
-
-        i = 0
-        for code in tmp['종목코드'] :
+            date, y, _= file.split("_")
             
-            i += 1
-            # 가격 정보가 없는 경우 다음으로 
-            nm = f'price/{code}.csv'
-            if not os.path.exists(nm) :
-                continue
-
-            p = pd.read_csv(nm)
-            p['Date'] = pd.to_datetime(p['Date'])
-            p = p.set_index('Date').loc[buy_date:sell_date]['Change']
+            tmp = pd.read_csv(f"{test_period}_summary/{file}")
+            tmp['날짜'] = date
+            tmp['기준'] = y
             
-            
-            if p.std() > 0.0 :
-                # 가격은 있으나, 거래정지 등의 사유로 표준편차가 0인 경우는 제외
-                tmp.loc[tmp['종목코드'] == code, '기간수익률'] = p.sum()   # 전일 대비 등락률의 합 = 기간수익률
-                tmp.loc[tmp['종목코드'] == code, '표준편차'] = p.std()     # 전일 대비 등락률의 표준편차
-            
-            
-            print(f"{i}번째 작업 중 | 진행률 : {(i / len(tmp['종목코드'])) * 100:5.2f}%", end = "\r")
+            summary = pd.concat([summary, tmp])
 
-        # 성과 데이터 생성
-        rf = riskfree.loc[buy_date:sell_date].mean().values[0]
-        tmp['성과'] = (tmp['기간수익률'] - rf) / tmp['표준편차']
-        
-        # 결과 요약
-        print()
-        print("백테스팅 결과")
-        summary = tmp.dropna().groupby('그룹', observed=False)[['성과']].mean()
-        print(summary)
-        print()
-
-        os.makedirs('summary', exist_ok=True)
-        summary.to_csv(f"summary/{date.strftime('%Y-%m-%d')}_{y}_buffer1M.csv")
-
-        # 분석용 데이터 저장
-        os.makedirs('result', exist_ok=True)
-        tmp.to_csv(f"result/{date.strftime('%Y-%m-%d')}_{y}_buffer1M.csv", index = False)
+        summary = summary.pivot(index = ['날짜', '그룹'], columns = '기준', values='성과')
+        summary.to_excel(f'{test_period}_summary_buffer{buffer}M.xlsx')

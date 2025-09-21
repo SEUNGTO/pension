@@ -66,13 +66,15 @@ def make_clean_data(item) :
     data = data[con2]
 
     # 4) 데이터 속성 변경
+    sign = [-1 if "-" in v else 1 for v in data['thstrm_amount']]
     data['thstrm_amount'] = data['thstrm_amount'].apply(lambda x : re.sub(r"\D+", '', x))
     data['thstrm_amount'] = data['thstrm_amount'].astype(float)
+    data['thstrm_amount'] = data['thstrm_amount'] * sign
 
     # 5) 불필요한 데이터 삭제
     data.drop(['sj_nm', 'fs_div'], axis = 1, inplace = True)
 
-    # 5) 컬럼명 변경
+    # 6) 컬럼명 변경
     new_col_name = {
         'stock_code' : '종목코드',
         'thstrm_dt' : '날짜',
@@ -90,7 +92,6 @@ if __name__ == '__main__' :
     CORPS = pd.read_csv('data/corp_code.csv', dtype = str, sep = "\t")
     CORPS = CORPS.dropna().reset_index(drop = True)
     CORP_CODE_LIST = CORPS['corp_code']
-    
 
     YEAR_LIST = range(2015, 2025)
     REPRT_LIST = ['11013', '11012', '11014', '11011']
