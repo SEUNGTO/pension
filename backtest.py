@@ -1,8 +1,9 @@
 import os
-from tqdm import tqdm
+import pdb
 import pandas as pd
-import FinanceDataReader as fdr
+from tqdm import tqdm
 from pandas.tseries.offsets import MonthBegin, MonthEnd
+
 
 # +-----------------------+
 # | 1. 데이터 전처리        |
@@ -10,7 +11,6 @@ from pandas.tseries.offsets import MonthBegin, MonthEnd
 
 # 재무제표 데이터 불러오기
 fs = pd.read_csv('data/pivot_data.csv', sep = "\t", dtype = str).reset_index(drop=True)
-
 # Risk free rate (국고채3년물 수익률)
 # 데이터 출처 : 한국은행 (https://snapshot.bok.or.kr/dashboard/A2)
 riskfree = pd.read_csv('data/riskfree.csv')
@@ -101,55 +101,56 @@ for test_period, setting in test_setting.items() :
     for buffer in [0, 1] : 
 
         for date in date_list :
+            
+            print()
+            print(f"[Test] Buffer : {buffer} | Period : {test_period} | Date : {date.strftime('%Y-%m-%d')}")
+            
+            tmp = fs.loc[fs['날짜'] == date, ['종목코드', '날짜'] + y_list].copy()
+
+            # 가격 데이터 불러오기
+            buy_date = date + MonthBegin(buffer + 0)
+            sell_date = date + MonthEnd(buffer + holding_period)
+
+            i = 0
+            for code in tmp['종목코드'] :
+                
+                i += 1
+                # 가격 정보가 없는 경우 다음으로 
+                nm = f'price/{code}.csv'
+                if not os.path.exists(nm) :
+                    continue
+
+                p = pd.read_csv(nm)
+                p['Date'] = pd.to_datetime(p['Date'])
+                p = p.set_index('Date').loc[buy_date:sell_date]['Change']
+                
+                
+                if p.std() > 0.0 :
+                    # 가격은 있으나, 거래정지 등의 사유로 표준편차가 0인 경우는 제외    
+                    tmp.loc[tmp['종목코드'] == code, '기간수익률'] = p.sum()   # 전일 대비 등락률의 합 = 기간수익률
+                    tmp.loc[tmp['종목코드'] == code, '표준편차'] = p.std()     # 전일 대비 등락률의 표준편차
+                
+                
+                print(f"[가격데이터] {i:4.0f}번째 작업 중 | 진행률 : {(i / len(tmp['종목코드'])) * 100:5.2f}%", end = "\r")
 
             for y in y_list :
-                
-                print(f"BUFFER : {buffer} | {test_period} |{date.strftime('%Y-%m-%d')} | {y}               ")
 
-                tmp = fs.loc[fs['날짜'] == date, ['종목코드', '날짜', y]].copy()
-                tmp['그룹'] = pd.qcut(tmp[y], len(group), labels=group)
-                tmp['기간수익률'] = None
-                tmp['표준편차'] = None
-
-                
-                buy_date = date + MonthBegin(buffer + 0)
-                sell_date = date + MonthEnd(buffer + holding_period)
-
-                i = 0
-                for code in tmp['종목코드'] :
-                    
-                    i += 1
-                    # 가격 정보가 없는 경우 다음으로 
-                    nm = f'price/{code}.csv'
-                    if not os.path.exists(nm) :
-                        continue
-
-                    p = pd.read_csv(nm)
-                    p['Date'] = pd.to_datetime(p['Date'])
-                    p = p.set_index('Date').loc[buy_date:sell_date]['Change']
-                    
-                    
-                    if p.std() > 0.0 :
-                        # 가격은 있으나, 거래정지 등의 사유로 표준편차가 0인 경우는 제외
-                        tmp.loc[tmp['종목코드'] == code, '기간수익률'] = p.sum()   # 전일 대비 등락률의 합 = 기간수익률
-                        tmp.loc[tmp['종목코드'] == code, '표준편차'] = p.std()     # 전일 대비 등락률의 표준편차
-                    
-                    
-                    print(f" - {i}번째 작업 중 | 진행률 : {(i / len(tmp['종목코드'])) * 100:5.2f}%", end = "\r")
+                result = tmp[['종목코드', '날짜','기간수익률','표준편차', y]].copy()
+                result['그룹'] = pd.qcut(result[y], len(group), labels=group)
 
                 # 성과 데이터 생성
                 rf = riskfree.loc[buy_date:sell_date].mean().values[0]
-                tmp['성과'] = (tmp['기간수익률'] - rf) / tmp['표준편차']
+                result['성과'] = (result['기간수익률'] - rf) / result['표준편차']
                 
                 os.makedirs(f'{test_period}_summary', exist_ok=True)
-                summary = tmp.dropna().groupby('그룹', observed=False)[['성과']].mean()
+                summary = result.dropna().groupby('그룹', observed=False)[['성과']].mean()
                 summary.to_csv(f"{test_period}_summary/{date.strftime('%Y-%m-%d')}_{y}_buffer{buffer}M.csv")
 
                 # 분석용 데이터 저장
                 os.makedirs(f'{test_period}_result', exist_ok=True)
-                tmp.to_csv(f"{test_period}_result/{date.strftime('%Y-%m-%d')}_{y}_buffer{buffer}M.csv", index = False)
-        
+                result.to_csv(f"{test_period}_result/{date.strftime('%Y-%m-%d')}_{y}_buffer{buffer}M.csv", index = False)
 
+        
         # +-----------------------+
         # | 4. 결과 요약           |
         # +-----------------------+

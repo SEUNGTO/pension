@@ -42,17 +42,17 @@ def fetch_financial_report(corp_code, bsns_year, reprt_code) :
 
 def make_clean_data(item) :
 
-    # 필요한 데이터만 가져오기    
+    # 필요한 데이터만 가져오기
     cols = ['stock_code', 'thstrm_dt', 'fs_div', 'sj_nm', 'account_nm', 'thstrm_amount', ]
     data = item[cols]
 
-    # 1) 기준일자 추출
+    # 1. 기준일자 추출
     date = data.loc[data['sj_nm'] == '재무상태표', 'thstrm_dt'].unique()[0]
     date = re.sub(r'\D+', '', date)
     date = pd.to_datetime(date)
     data.loc[:, 'thstrm_dt'] = date
 
-    # 2) 재무제표 선택 (연결재무제표가 있는 경우 연결재무제표, 없으면 개별재무제표)
+    # 2. 재무제표 선택 (연결재무제표가 있는 경우 연결재무제표, 없으면 개별재무제표)
     fs_div = 'CFS'
     fs_div_list = data['fs_div'].unique()
     if 'CFS' not in fs_div_list :
@@ -60,21 +60,23 @@ def make_clean_data(item) :
     con1 = data['fs_div'] == fs_div
     data = data[con1]
     
-    # 3) 수익성 지표에 해당하는 계정 선택
-    acnt_list = ['매출액', '영업이익', '법인세차감전 순이익', '당기순이익', '자산총계', '자본총계']
+    # 3. 수익성 지표에 해당하는 계정 선택
+    acnt_list = ['매출액', '영업이익', '법인세차감전 순이익', '당기순이익', '당기순이익(손실)', '자산총계', '자본총계']
     con2 = data['account_nm'].isin(acnt_list)
     data = data[con2]
+    data['account_nm'] = data['account_nm'].str.replace("당기순이익(손실)", '당기순이익')
+    data = data.drop_duplicates()
 
-    # 4) 데이터 속성 변경
+    # 4. 데이터 속성 변경
     sign = [-1 if "-" in v else 1 for v in data['thstrm_amount']]
     data['thstrm_amount'] = data['thstrm_amount'].apply(lambda x : re.sub(r"\D+", '', x))
     data['thstrm_amount'] = data['thstrm_amount'].astype(float)
     data['thstrm_amount'] = data['thstrm_amount'] * sign
 
-    # 5) 불필요한 데이터 삭제
+    # 5. 불필요한 데이터 삭제
     data.drop(['sj_nm', 'fs_div'], axis = 1, inplace = True)
 
-    # 6) 컬럼명 변경
+    # 6. 컬럼명 변경
     new_col_name = {
         'stock_code' : '종목코드',
         'thstrm_dt' : '날짜',
@@ -99,7 +101,7 @@ if __name__ == '__main__' :
     result = pd.DataFrame()
     
     i = 0
-    batch_size = 20
+    batch_size = 40
     corp_iter = int(len(CORP_CODE_LIST)/batch_size)
     total_iter = corp_iter * len(YEAR_LIST) * len(REPRT_LIST)
     print("total_iter :", total_iter)
