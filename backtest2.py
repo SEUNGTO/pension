@@ -9,7 +9,14 @@ from pandas.tseries.offsets import MonthBegin, MonthEnd
 # | 1. 데이터 전처리        |
 # +-----------------------+
 
-
+# 1. 상장되지 않은 기업은 제외
+# 2. 보유기간동안 거래정지된 기업 제외
+#  - 단, 거래정지 여부는 공시로 판단하지 않고, 가격변동으로 봄 (표준편차 0)
+# 3. 금융회사(은행, 보험, 증권사 등) 제외
+# 4. 팩터 중에 일부라도 데이터가 없는 기업 제외 (e.g. 영업이익을 보고하지 않는 경우)
+# 5. 결산월이 12월이 아닌 기업은 제외
+# 6. 기타 분석이 불가능한 경우 제외
+#  - 매출액이 0원인 경우
 
 
 # 재무제표 데이터 불러오기
@@ -81,41 +88,53 @@ date_list = fs['날짜'].sort_values().unique()  # 리밸런싱 주기를 늘리
 # 백테스팅 설정
 test_setting = {
     'quarterly' : {
-        'holding_period' : 3,
+        'rebalnace_period' : 3,
         'rebalance_month' : [3, 6, 9, 12]
     },
     'semiannually' : {
-        'holding_period' : 6,
+        'rebalnace_period' : 6,
         'rebalance_month' : [6, 12]
     },
     'annually' : {
-        'holding_period' : 12,
+        'rebalnace_period' : 12,
         'rebalance_month' : [12]
     },
 }
 
-for test_period, setting in test_setting.items() :
+for rebalance, setting in test_setting.items() :
 
-    holding_period = setting['holding_period']
+    rebalnace_period = setting['rebalnace_period']
     rebalance_month = setting['rebalance_month']
     date_list = [d for d in date_list if d.month in rebalance_month]
 
 
     for buffer in [0, 1] : 
+        
+        pf_return = pd.DataFrame()
 
         for date in date_list :
             
-            print()
-            print(f"[Test] Buffer : {buffer} | Period : {test_period} | Date : {date.strftime('%Y-%m-%d')}")
+            print(f"리밸런싱 주기 : {rebalance} | 기준일자 : {date}")
             
             tmp = fs.loc[fs['날짜'] == date, ['종목코드', '날짜'] + y_list].copy()
+            
+            # 종목의 가격 데이터 불러오기
+            first_date = date + MonthBegin(buffer + 0)
+            last_date = date + MonthEnd(buffer + rebalnace_period)
+            
+            # 불러와야 할 종목 리스트 추리기 (팩터별 상위 20%)            
+            stock_list = []
+            for y in y_list :
+                grouping = tmp[['종목코드', '날짜', y]].copy()
+                grouping['그룹'] = pd.qcut(grouping[y], len(group), labels=group)
+                
+                stock_list += grouping.loc[grouping['그룹'] == 'G5', '종목코드'].to_list()
 
-            # 가격 데이터 불러오기
-            buy_date = date + MonthBegin(buffer + 0)
-            sell_date = date + MonthEnd(buffer + holding_period)
+            stock_list = list(set(stock_list)) # 불러와야 할 종목 
 
             i = 0
-            for code in tmp['종목코드'] :
+            stock_price = pd.DataFrame()
+            for code in stock_list :
                 
                 i += 1
                 # 가격 정보가 없는 경우 다음으로 
@@ -124,51 +143,33 @@ for test_period, setting in test_setting.items() :
                     continue
 
                 p = pd.read_csv(nm)
+                p = p[['Date', 'Change']]
+                p.columns = ['Date', code]
                 p['Date'] = pd.to_datetime(p['Date'])
-                p = p.set_index('Date').loc[buy_date:sell_date]['Change']
+                p = p.set_index('Date').loc[first_date:last_date][code]
                 
                 
                 if p.std() > 0.0 :
-                    # 가격은 있으나, 거래정지 등의 사유로 표준편차가 0인 경우는 제외    
-                    tmp.loc[tmp['종목코드'] == code, '기간수익률'] = p.sum()   # 전일 대비 등락률의 합 = 기간수익률
-                    tmp.loc[tmp['종목코드'] == code, '표준편차'] = p.std()     # 전일 대비 등락률의 표준편차
+                    stock_price = pd.concat([stock_price, p], axis = 1)
                 
-                
-                print(f"[가격데이터] {i:4.0f}번째 작업 중 | 진행률 : {(i / len(tmp['종목코드'])) * 100:5.2f}%", end = "\r")
+                print(f"[가격데이터] {i:4.0f}번째 작업 중 | 진행률 : {(i / len(stock_list)) * 100:5.2f}%       ", end = "\r")
 
+            # 포트폴리오 일별 수익률 구하기
+            price = pd.DataFrame()
             for y in y_list :
 
-                result = tmp[['종목코드', '날짜','기간수익률','표준편차', y]].copy()
+                result = tmp[['종목코드', y]].copy()
                 result['그룹'] = pd.qcut(result[y], len(group), labels=group)
-
-                # 성과 데이터 생성
-                rf = riskfree.loc[buy_date:sell_date].mean().values[0]
-                result['성과'] = (result['기간수익률'] - rf) / result['표준편차']
+                result = result[result['그룹'] == 'G5']
+               
+                col = [c for c in result['종목코드'] if c in stock_price.columns]
+                result = stock_price[col].mean(axis = 1)
+                result = pd.DataFrame(result, columns = [y])
                 
-                os.makedirs(f'{test_period}_summary', exist_ok=True)
-                summary = result.dropna().groupby('그룹', observed=False)[['성과']].mean()
-                summary.to_csv(f"{test_period}_summary/{date.strftime('%Y-%m-%d')}_{y}_buffer{buffer}M.csv")
+                price = pd.concat([price, result], axis = 1)
 
-                # 분석용 데이터 저장
-                os.makedirs(f'{test_period}_result', exist_ok=True)
-                result.to_csv(f"{test_period}_result/{date.strftime('%Y-%m-%d')}_{y}_buffer{buffer}M.csv", index = False)
-
+            # 리밸런싱 기간 동안의 데이터 합치기
+            pf_return = pd.concat([pf_return, price])
         
-        # +-----------------------+
-        # | 4. 결과 요약           |
-        # +-----------------------+
-        file_list = os.listdir(f'{test_period}_summary')
-        file_list = [f for f in file_list if f"buffer{buffer}M" in f]
-        summary = pd.DataFrame()
-        for file in tqdm(file_list) :
-
-            date, y, _= file.split("_")
-            
-            tmp = pd.read_csv(f"{test_period}_summary/{file}")
-            tmp['날짜'] = date
-            tmp['기준'] = y
-            
-            summary = pd.concat([summary, tmp])
-
-        summary = summary.pivot(index = ['날짜', '그룹'], columns = '기준', values='성과')
-        summary.to_excel(f'{test_period}_summary_buffer{buffer}M.xlsx')
+        pf_return.index = pd.to_datetime(pf_return.index)
+        pf_return.to_excel(f'return_{rebalance}_rebalance_buffer{buffer}M.xlsx')

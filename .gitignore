@@ -212,3 +212,4 @@ __marimo__/
 reference
 test.py
 errors.txt
+*.zip
