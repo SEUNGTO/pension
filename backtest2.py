@@ -88,88 +88,106 @@ date_list = fs['날짜'].sort_values().unique()  # 리밸런싱 주기를 늘리
 # 백테스팅 설정
 test_setting = {
     'quarterly' : {
-        'rebalnace_period' : 3,
+        'period' : {
+            12 : 2,
+            9 : 4,
+            6 : 3,
+            3 : 3
+        },
         'rebalance_month' : [3, 6, 9, 12]
     },
     'semiannually' : {
-        'rebalnace_period' : 6,
+        'period' : {
+            12 : 5,
+            6 : 7,
+        },
         'rebalance_month' : [6, 12]
     },
     'annually' : {
-        'rebalnace_period' : 12,
+        'period' : {
+            12 : 12,
+        },
         'rebalance_month' : [12]
     },
 }
 
 for rebalance, setting in test_setting.items() :
 
-    rebalnace_period = setting['rebalnace_period']
+    # rebalnace_period = setting['rebalnace_period']
     rebalance_month = setting['rebalance_month']
     date_list = [d for d in date_list if d.month in rebalance_month]
 
 
-    for buffer in [0, 1] : 
+    pf_return = pd.DataFrame()
+
+    for date in date_list :
         
-        pf_return = pd.DataFrame()
-
-        for date in date_list :
-            
-            print(f"리밸런싱 주기 : {rebalance} | 기준일자 : {date}")
-            
-            tmp = fs.loc[fs['날짜'] == date, ['종목코드', '날짜'] + y_list].copy()
-            
-            # 종목의 가격 데이터 불러오기
-            first_date = date + MonthBegin(buffer + 0)
-            last_date = date + MonthEnd(buffer + rebalnace_period)
-            
-            # 불러와야 할 종목 리스트 추리기 (팩터별 상위 20%)            
-            stock_list = []
-            for y in y_list :
-                grouping = tmp[['종목코드', '날짜', y]].copy()
-                grouping['그룹'] = pd.qcut(grouping[y], len(group), labels=group)
-                
-                stock_list += grouping.loc[grouping['그룹'] == 'G5', '종목코드'].to_list()
-
-            stock_list = list(set(stock_list)) # 불러와야 할 종목 
-
-            i = 0
-            stock_price = pd.DataFrame()
-            for code in stock_list :
-                
-                i += 1
-                # 가격 정보가 없는 경우 다음으로 
-                nm = f'price/{code}.csv'
-                if not os.path.exists(nm) :
-                    continue
-
-                p = pd.read_csv(nm)
-                p = p[['Date', 'Change']]
-                p.columns = ['Date', code]
-                p['Date'] = pd.to_datetime(p['Date'])
-                p = p.set_index('Date').loc[first_date:last_date][code]
-                
-                
-                if p.std() > 0.0 :
-                    stock_price = pd.concat([stock_price, p], axis = 1)
-                
-                print(f"[가격데이터] {i:4.0f}번째 작업 중 | 진행률 : {(i / len(stock_list)) * 100:5.2f}%       ", end = "\r")
-
-            # 포트폴리오 일별 수익률 구하기
-            price = pd.DataFrame()
-            for y in y_list :
-
-                result = tmp[['종목코드', y]].copy()
-                result['그룹'] = pd.qcut(result[y], len(group), labels=group)
-                result = result[result['그룹'] == 'G5']
-               
-                col = [c for c in result['종목코드'] if c in stock_price.columns]
-                result = stock_price[col].mean(axis = 1)
-                result = pd.DataFrame(result, columns = [y])
-                
-                price = pd.concat([price, result], axis = 1)
-
-            # 리밸런싱 기간 동안의 데이터 합치기
-            pf_return = pd.concat([pf_return, price])
         
-        pf_return.index = pd.to_datetime(pf_return.index)
-        pf_return.to_excel(f'return_{rebalance}_rebalance_buffer{buffer}M.xlsx')
+        tmp = fs.loc[fs['날짜'] == date, ['종목코드', '날짜'] + y_list].copy()
+        period = test_setting[rebalance]['period'][date.month]
+
+        buffer = 0
+        if date.month == 12 :
+            buffer = 3
+        elif date.month == 9 :
+            buffer = 2
+        else :
+            buffer = 2
+        # 종목의 가격 데이터 불러오기
+        first_date = date + MonthBegin(buffer) + pd.Timedelta(days=14)
+        last_date = date + MonthBegin(buffer + period) + pd.Timedelta(days=14-1)
+        
+
+        print(f"리밸런싱 주기 : {rebalance} | 기준일자 : {date.strftime('%Y-%m-%d')} | 매수일자 : {first_date.strftime('%Y-%m-%d')} | 매도일자 : {last_date.strftime('%Y-%m-%d')}       ")
+
+        # 불러와야 할 종목 리스트 추리기 (팩터별 상위 20%)            
+        stock_list = []
+        for y in y_list :
+            grouping = tmp[['종목코드', '날짜', y]].copy()
+            grouping['그룹'] = pd.qcut(grouping[y], len(group), labels=group)
+            
+            stock_list += grouping.loc[grouping['그룹'] == 'G5', '종목코드'].to_list()
+
+        stock_list = list(set(stock_list)) # 불러와야 할 종목 
+
+        i = 0
+        stock_price = pd.DataFrame()
+        for code in stock_list :
+            
+            i += 1
+            # 가격 정보가 없는 경우 다음으로 
+            nm = f'price/{code}.csv'
+            if not os.path.exists(nm) :
+                continue
+
+            p = pd.read_csv(nm)
+            p = p[['Date', 'Change']]
+            p.columns = ['Date', code]
+            p['Date'] = pd.to_datetime(p['Date'])
+            p = p.set_index('Date').loc[first_date:last_date][code]
+            
+            
+            if p.std() > 0.0 :
+                stock_price = pd.concat([stock_price, p], axis = 1)
+            
+            print(f"[가격데이터] {i:4.0f}번째 작업 중 | 진행률 : {(i / len(stock_list)) * 100:5.2f}%       ", end = "\r")
+
+        # 포트폴리오 일별 수익률 구하기
+        price = pd.DataFrame()
+        for y in y_list :
+
+            result = tmp[['종목코드', y]].copy()
+            result['그룹'] = pd.qcut(result[y], len(group), labels=group)
+            result = result[result['그룹'] == 'G5']
+            
+            col = [c for c in result['종목코드'] if c in stock_price.columns]
+            result = stock_price[col].mean(axis = 1)
+            result = pd.DataFrame(result, columns = [y])
+            
+            price = pd.concat([price, result], axis = 1)
+
+        # 리밸런싱 기간 동안의 데이터 합치기
+        pf_return = pd.concat([pf_return, price])
+    
+    pf_return.index = pd.to_datetime(pf_return.index)
+    pf_return.to_excel(f'250923_return_{rebalance}_rebalance.xlsx')
