@@ -122,7 +122,7 @@ for rebalance, setting in test_setting.items() :
             first_date = date + MonthBegin(buffer + 0)
             last_date = date + MonthEnd(buffer + rebalnace_period)
             
-            # 불러와야 할 종목 리스트 추리기 (팩터별 상위 20%)            
+            # 불러와야 할 종목 리스트 추리기 (팩터별 상위 20%)
             stock_list = []
             for y in y_list :
                 grouping = tmp[['종목코드', '날짜', y]].copy()
