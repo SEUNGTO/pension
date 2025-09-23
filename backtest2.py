@@ -120,23 +120,33 @@ for rebalance, setting in test_setting.items() :
 
     pf_return = pd.DataFrame()
 
-        for date in date_list :
+    for date in date_list :
+        
+        
+        tmp = fs.loc[fs['날짜'] == date, ['종목코드', '날짜'] + y_list].copy()
+        period = test_setting[rebalance]['period'][date.month]
+
+        buffer = 0
+        if date.month == 12 :
+            buffer = 3
+        elif date.month == 9 :
+            buffer = 2
+        else :
+            buffer = 2
+        # 종목의 가격 데이터 불러오기
+        first_date = date + MonthBegin(buffer) + pd.Timedelta(days=14)
+        last_date = date + MonthBegin(buffer + period) + pd.Timedelta(days=14-1)
+        
+
+        print(f"리밸런싱 주기 : {rebalance} | 기준일자 : {date.strftime('%Y-%m-%d')} | 매수일자 : {first_date.strftime('%Y-%m-%d')} | 매도일자 : {last_date.strftime('%Y-%m-%d')}       ")
+
+        # 불러와야 할 종목 리스트 추리기 (팩터별 상위 20%)            
+        stock_list = []
+        for y in y_list :
+            grouping = tmp[['종목코드', '날짜', y]].copy()
+            grouping['그룹'] = pd.qcut(grouping[y], len(group), labels=group)
             
-            print(f"리밸런싱 주기 : {rebalance} | 기준일자 : {date}")
-            
-            tmp = fs.loc[fs['날짜'] == date, ['종목코드', '날짜'] + y_list].copy()
-            
-            # 종목의 가격 데이터 불러오기
-            first_date = date + MonthBegin(buffer + 0)
-            last_date = date + MonthEnd(buffer + rebalnace_period)
-            
-            # 불러와야 할 종목 리스트 추리기 (팩터별 상위 20%)            
-            stock_list = []
-            for y in y_list :
-                grouping = tmp[['종목코드', '날짜', y]].copy()
-                grouping['그룹'] = pd.qcut(grouping[y], len(group), labels=group)
-                
-                stock_list += grouping.loc[grouping['그룹'] == 'G5', '종목코드'].to_list()
+            stock_list += grouping.loc[grouping['그룹'] == 'G5', '종목코드'].to_list()
 
         stock_list = list(set(stock_list)) # 불러와야 할 종목 
 
