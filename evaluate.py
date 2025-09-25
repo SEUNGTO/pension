@@ -15,7 +15,7 @@ def annual_returns(data, ret) :
 def beta(data, ret, rf, bm):
     returns = data[ret]
     riskfree = data[rf]
-    marketex = data[bm]
+    marketex = data[bm] - riskfree
 
     riskfree = convert_yearly_to_daily(riskfree)
     exreturns = returns - riskfree
@@ -25,7 +25,8 @@ def beta(data, ret, rf, bm):
 def alpha(data, ret, rf, bm):
     returns = data[ret]
     riskfree = data[rf]
-    marketex = data[bm]
+    marketex = data[bm] - riskfree
+
     riskfree = convert_yearly_to_daily(riskfree)
     exreturns = returns - riskfree
     alpha=np.mean(exreturns)-beta(data, ret, rf, bm)*np.mean(marketex)
@@ -51,7 +52,6 @@ def treynor_ratio(data, ret, rf, bm):
 
     returns = data[ret]
     crf = data[rf]
-    market = data[bm]
 
     cum_returns = (1+returns).prod()
     period = len(returns)
