@@ -122,7 +122,6 @@ for rebalance, setting in test_setting.items() :
 
     for date in date_list :
         
-        
         tmp = fs.loc[fs['날짜'] == date, ['종목코드', '날짜'] + y_list].copy()
         period = test_setting[rebalance]['period'][date.month]
 
@@ -136,6 +135,10 @@ for rebalance, setting in test_setting.items() :
         # 종목의 가격 데이터 불러오기
         first_date = date + MonthBegin(buffer) + pd.Timedelta(days=14)
         last_date = date + MonthBegin(buffer + period) + pd.Timedelta(days=14-1)
+
+
+        if rebalance == 'quarterly' and date == pd.to_datetime('2024-12-31') :
+            last_date = pd.to_datetime('2025-06-30')
         
 
         print(f"리밸런싱 주기 : {rebalance} | 기준일자 : {date.strftime('%Y-%m-%d')} | 매수일자 : {first_date.strftime('%Y-%m-%d')} | 매도일자 : {last_date.strftime('%Y-%m-%d')}       ")
@@ -148,7 +151,7 @@ for rebalance, setting in test_setting.items() :
             
             stock_list += grouping.loc[grouping['그룹'] == 'G5', '종목코드'].to_list()
 
-        stock_list = list(set(stock_list)) # 불러와야 할 종목 
+        stock_list = list(set(stock_list)) # 불러와야 할 종목
 
         i = 0
         stock_price = pd.DataFrame()
